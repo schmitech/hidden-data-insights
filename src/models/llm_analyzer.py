@@ -24,6 +24,9 @@ class LLMAnalyzer:
         if not self.api_key:
             raise ValueError("OpenAI API key is required. Please provide it or set OPENAI_API_KEY environment variable.")
         
+        # Get the model name from environment variable with a fallback
+        self.model_name = os.getenv("OPENAI_MODEL", "gpt-4.5-preview")
+        
         self.client = OpenAI(api_key=self.api_key)
     
     def _prepare_data_summary(self, df, max_rows=10):
@@ -165,7 +168,7 @@ class LLMAnalyzer:
         
         # Call OpenAI API
         response = self.client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model=self.model_name,
             messages=[
                 {"role": "system", "content": "You are a data analysis expert specializing in finding hidden patterns and insights in complex datasets. Your analysis should be thorough and insightful for general patterns, but extremely concise and direct when answering specific questions. For specific questions, provide only the exact answer without elaboration or context."},
                 {"role": "user", "content": prompt}
@@ -300,7 +303,7 @@ class LLMAnalyzer:
         
         # Call OpenAI API
         response = self.client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model=self.model_name,
             messages=[
                 {"role": "system", "content": "You are an expert evaluator of data analysis results. Your job is to objectively assess how well an AI system has discovered hidden patterns in data."},
                 {"role": "user", "content": prompt}

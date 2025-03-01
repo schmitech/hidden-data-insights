@@ -26,6 +26,9 @@ def run_demo():
         print("You can add it to a .env file in the project root directory.")
         return
     
+    # Get model name from environment variables with fallback
+    model_name = os.getenv("OPENAI_MODEL", "gpt-4.5-preview")
+    
     # Initialize components
     data_generator = DataGenerator()
     llm_analyzer = LLMAnalyzer(api_key=api_key)
@@ -60,7 +63,7 @@ def run_demo():
         print(f"{i}. {pattern}")
     
     # Analyze the dataset
-    print("\nAnalyzing dataset with o3-mini...")
+    print(f"\nAnalyzing dataset with {model_name}...")
     analysis_results = llm_analyzer.analyze_dataset(
         df,
         domain="e-commerce",
@@ -98,25 +101,49 @@ def run_demo():
     print("\nEvaluation:")
     print(comparison["evaluation"])
     
-    # Save results to file
-    print("\nSaving results to 'demo_results.txt'...")
-    with open("demo_results.txt", "w") as f:
-        f.write("=" * 80 + "\n")
-        f.write("Hidden Data Insights - Demonstration Results\n")
-        f.write("=" * 80 + "\n\n")
+    # Save results to markdown file
+    print("\nSaving results to 'demo_results.md'...")
+    with open("demo_results.md", "w") as f:
+        f.write(f"# Hidden Data Insights - Demonstration Results\n\n")
+        f.write(f"## Model: {model_name}\n\n")
         
-        f.write("Actual Hidden Patterns:\n")
+        f.write("## Actual Hidden Patterns\n\n")
         for i, pattern in enumerate(actual_patterns, 1):
             f.write(f"{i}. {pattern}\n")
         
-        f.write("\nDiscovered Hidden Patterns:\n")
+        f.write("\n## Discovered Hidden Patterns\n\n")
         for i, pattern in enumerate(analysis_results["hidden_patterns"], 1):
             f.write(f"{i}. {pattern}\n")
         
-        f.write("\nEvaluation:\n")
-        f.write(comparison["evaluation"])
+        f.write("\n## Unusual Correlations\n\n")
+        for i, corr in enumerate(analysis_results["unusual_correlations"], 1):
+            f.write(f"{i}. {corr}\n")
+        
+        f.write("\n## Potential Causal Relationships\n\n")
+        for i, rel in enumerate(analysis_results["causal_relationships"], 1):
+            f.write(f"{i}. {rel}\n")
+        
+        f.write("\n## Recommendations\n\n")
+        for i, rec in enumerate(analysis_results["recommendations"], 1):
+            f.write(f"{i}. {rec}\n")
+        
+        f.write("\n## Evaluation\n\n")
+        # Format the evaluation text for markdown
+        evaluation_text = comparison["evaluation"].replace("\n", "\n\n")
+        f.write(evaluation_text)
+        
+        # Add a summary section
+        f.write("\n\n## Analysis Summary\n\n")
+        f.write(analysis_results["summary"])
+        
+        # Add specific answers if available
+        if analysis_results.get("specific_answers"):
+            f.write("\n\n## Answers to Specific Questions\n\n")
+            for answer in analysis_results["specific_answers"]:
+                f.write(f"### {answer.split('\nA:')[0].replace('Q: ', '')}\n\n")
+                f.write(f"{answer.split('\nA:')[1].strip()}\n\n")
     
-    print("\nDemonstration complete! Results saved to 'demo_results.txt'")
+    print("\nDemonstration complete! Results saved to 'demo_results.md'")
     print("=" * 80)
     print("To run the web application, execute: python src/app.py")
     print("=" * 80)

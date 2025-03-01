@@ -1,6 +1,6 @@
 # Hidden Data Insights
 
-A proof-of-concept application that demonstrates how Large Language Models (specifically OpenAI's GPT-3.5) can extract hidden patterns and insights from complex datasets without the need for specialized data analysts.
+A proof-of-concept application that demonstrates how Large Language Models (specifically OpenAI's GPT-4.5 Preview) can extract hidden patterns and insights from complex datasets without the need for specialized data analysts.
 
 ## Executive Summary
 
@@ -35,7 +35,7 @@ graph LR
 
 This application:
 1. Generates synthetic datasets with embedded hidden patterns
-2. Uses OpenAI's GPT-3.5 model to analyze and extract insights from the data
+2. Uses OpenAI's GPT-4.5 Preview model to analyze and extract insights from the data
 3. Visualizes both the raw data and the discovered patterns
 4. Provides a user-friendly web interface for interaction
 
@@ -57,7 +57,7 @@ flowchart TD
     
     subgraph "Hidden Data Insights Platform"
         B --> D[Data Analysis Engine]
-        D <--> E[LLM Analysis\nGPT-3.5]
+        D <--> E[LLM Analysis\nGPT-4.5 Preview]
         D --> F[Pattern Detection]
         D --> G[Correlation Discovery]
         F --> H[Visualization Engine]
@@ -97,9 +97,10 @@ flowchart TD
    ```bash
    pip install -r requirements.txt
    ```
-4. Create a `.env` file in the root directory with your OpenAI API key:
+4. Create a `.env` file in the root directory with your OpenAI API key and model:
    ```
    OPENAI_API_KEY=your_api_key_here
+   OPENAI_MODEL=gpt-4.5-preview
    ```
 5. Run the application:
    ```bash
@@ -123,6 +124,23 @@ python src/demo.py
 
 The results will be displayed in the console and saved to `demo_results.txt`.
 
+## Testing Different Models
+
+You can easily test different OpenAI models without modifying your `.env` file using the included model tester script:
+
+```bash
+# List available models
+python model_tester.py --list
+
+# Run the demo with a specific model
+python model_tester.py --model gpt-4 --demo
+
+# Run the web app with a specific model
+python model_tester.py --model gpt-3.5-turbo --app
+```
+
+This allows you to compare the performance of different models for your specific data analysis tasks.
+
 ## Troubleshooting
 
 ### OpenAI Package Compatibility Issues
@@ -142,7 +160,7 @@ This ensures compatibility between the OpenAI client and its dependencies.
 ## Components
 
 - **Data Generation**: Creates synthetic datasets with known hidden patterns
-- **LLM Analysis**: Leverages OpenAI's GPT-3.5 to extract insights
+- **LLM Analysis**: Leverages OpenAI's GPT-4.5 Preview to extract insights
 - **Visualization**: Interactive dashboards to explore data and findings
 - **Web Interface**: User-friendly interface for uploading custom datasets and viewing results
 

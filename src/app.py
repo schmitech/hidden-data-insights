@@ -10,6 +10,7 @@ import dash_bootstrap_components as dbc
 import plotly.express as px
 import plotly.graph_objects as go
 import re
+import markdown
 
 from utils.data_generator import DataGenerator
 from models.llm_analyzer import LLMAnalyzer
@@ -24,6 +25,9 @@ visualizer = DataVisualizer()
 
 # Check if API key is available
 api_key = os.getenv("OPENAI_API_KEY")
+# Get model name from environment variables with fallback
+model_name = os.getenv("OPENAI_MODEL", "gpt-4.5-preview")
+
 if api_key:
     llm_analyzer = LLMAnalyzer(api_key=api_key)
 else:
@@ -36,148 +40,241 @@ app = dash.Dash(
     suppress_callback_exceptions=True
 )
 
+# Add custom CSS for markdown rendering
+app.index_string = '''
+<!DOCTYPE html>
+<html>
+    <head>
+        {%metas%}
+        <title>{%title%}</title>
+        {%favicon%}
+        {%css%}
+        <style>
+            /* Custom CSS for markdown rendering */
+            .markdown-content strong {
+                font-weight: bold;
+            }
+            .markdown-content h3 {
+                margin-top: 1.5rem;
+                margin-bottom: 1rem;
+                font-weight: 600;
+            }
+            .markdown-content ul, .markdown-content ol {
+                margin-bottom: 1rem;
+                padding-left: 2rem;
+            }
+            .markdown-content li {
+                margin-bottom: 0.5rem;
+            }
+            .markdown-content p {
+                margin-bottom: 1rem;
+            }
+        </style>
+    </head>
+    <body>
+        {%app_entry%}
+        <footer>
+            {%config%}
+            {%scripts%}
+            {%renderer%}
+        </footer>
+    </body>
+</html>
+'''
+
 server = app.server
 app.title = "Hidden Data Insights"
 
-# Helper function to convert text to markdown
-def format_text_as_markdown(text):
+# Helper function to enhance markdown for better readability
+def enhance_markdown(text):
     """
-    Format text with markdown enhancements:
-    - Convert numbered lists to proper markdown
-    - Add bold to key terms
-    - Format section headers
+    Enhance markdown text for better readability:
+    - Ensure proper list formatting
+    - Add emphasis to key metrics and terms
+    - Ensure proper spacing
     """
     if not text:
         return text
     
-    # Convert numbered lists (e.g., "1. Item" to proper markdown)
-    # This regex ensures there's a space after the period in numbered lists
-    text = re.sub(r'(\d+)\.(?!\s)', r'\1. ', text)
+    # Normalize line endings
+    text = text.replace('\r\n', '\n')
     
-    # Add bold to key terms like "correlation", "pattern", etc.
-    # But only when they appear as standalone concepts, not as part of every sentence
+    # First, preserve any existing markdown formatting
+    # Save code blocks to prevent modifying them
+    code_blocks = []
+    def save_code_block(match):
+        code_blocks.append(match.group(0))
+        return f"CODE_BLOCK_{len(code_blocks)-1}"
+    
+    # Save existing markdown code blocks
+    text = re.sub(r'```[\s\S]+?```', save_code_block, text)
+    
+    # Handle section headers - convert "Title:" format to markdown headers
+    text = re.sub(r'^([A-Z][A-Za-z\s]+):(\s*)', r'### \1\2', text, flags=re.MULTILINE)
+    
+    # Handle dash-separated items (common in summaries)
+    # Convert "- Item:" to HTML bold for better rendering
+    text = re.sub(r'\s*-\s+([^:]+):', r'\n\n<strong>\1:</strong>', text)
+    
+    # Ensure numbered lists have proper spacing and formatting
+    # Add a space after numbers if missing
+    text = re.sub(r'^(\d+)\.(?!\s)', r'\1. ', text, flags=re.MULTILINE)
+    
+    # Ensure bullet points have proper spacing
+    text = re.sub(r'^\s*[-•]\s*', r'- ', text, flags=re.MULTILINE)
+    
+    # Bold percentages for emphasis using HTML tags
+    text = re.sub(r'(\d+\.?\d*\s*%)', r'<strong>\1</strong>', text)
+    
+    # Bold key terms for emphasis using HTML tags
     key_terms = [
-        r'\bkey correlation\b', r'\bstrong pattern\b', r'\bsignificant relationship\b', 
-        r'\bimportant trend\b', r'\bcritical insight\b', r'\bhighly significant\b', 
-        r'\bkey finding\b'
+        r'\bkey\b', r'\bsignificant\b', r'\bimportant\b', r'\bcritical\b', 
+        r'\bhighly\b', r'\bnotable\b', r'\bsubstantial\b', r'\bmajor\b',
+        r'\bstrong\b', r'\bclear\b', r'\bprimary\b', r'\bexceptional\b'
     ]
     
     for term in key_terms:
-        text = re.sub(term, f'**{term.replace(r"\b", "")}**', text, flags=re.IGNORECASE)
+        text = re.sub(term, f'<strong>{term.replace(r"\\b", "")}</strong>', text, flags=re.IGNORECASE)
     
-    # Format potential section headers
-    text = re.sub(r'^([A-Z][A-Za-z\s]+:)', r'### \1', text, flags=re.MULTILINE)
+    # Special handling for summary text that often has dash-separated items
+    # Look for patterns like "1. Title - Detail: More details"
+    text = re.sub(r'(\d+\.\s+[^-]+)\s*-\s*([^:]+):', r'\1\n\n<strong>\2:</strong>', text)
     
-    # Ensure proper list formatting
-    # Convert dash or bullet lists to proper markdown lists
-    text = re.sub(r'^\s*[-•]\s+', '- ', text, flags=re.MULTILINE)
+    # Convert any remaining markdown-style bold (**text**) to HTML bold
+    text = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', text)
     
-    # Ensure proper paragraph breaks
-    # Add double line breaks between paragraphs if they don't already exist
-    text = re.sub(r'(\n)(?!\n)', r'\n\n', text)
+    # Improve paragraph and list formatting
+    lines = text.split('\n')
+    formatted_lines = []
+    in_list = False
+    
+    for i, line in enumerate(lines):
+        # Check if this line is a list item
+        is_list_item = bool(line.strip().startswith('- ') or re.match(r'^\d+\.\s', line.strip()))
+        
+        # If we're transitioning into a list, add a blank line before
+        if is_list_item and not in_list and i > 0 and formatted_lines[-1].strip():
+            formatted_lines.append('')
+        
+        # Add the current line
+        formatted_lines.append(line)
+        
+        # If we're in a list and this is the last item or the next item is not a list item,
+        # add a blank line after
+        if is_list_item and i < len(lines) - 1:
+            next_line = lines[i+1]
+            next_is_list = bool(next_line.strip().startswith('- ') or re.match(r'^\d+\.\s', next_line.strip()))
+            
+            if not next_is_list and next_line.strip():
+                formatted_lines.append('')
+        
+        # Update list state
+        in_list = is_list_item
+    
+    # Join lines back together
+    text = '\n'.join(formatted_lines)
+    
+    # Ensure proper paragraph breaks by adding double line breaks between paragraphs
+    # but avoid adding too many breaks
+    text = re.sub(r'([^\n])\n([^\n-])', r'\1\n\n\2', text)
+    
+    # Add line breaks after colons in certain contexts (common in summaries)
+    text = re.sub(r':\s+([A-Z][a-z])', r':\n\n\1', text)
+    
+    # Remove excessive newlines (more than 2 consecutive)
+    text = re.sub(r'\n{3,}', r'\n\n', text)
+    
+    # Restore code blocks
+    for i, block in enumerate(code_blocks):
+        text = text.replace(f"CODE_BLOCK_{i}", block)
     
     return text
 
-# Helper function to ensure proper markdown list formatting
-def format_list_items(items):
+# Helper function to format list items as markdown
+def format_list_as_markdown(items):
     """
-    Format a list of items as a proper markdown list with appropriate spacing.
-    Each item will be on its own line with proper indentation.
+    Format a list of items as proper markdown list
     """
     if not items:
         return ""
     
-    # If we have a single item that contains multiple points, split it
-    if len(items) == 1 and len(items[0]) > 200:  # Long text likely containing multiple points
+    # If we have a single item that might contain multiple points
+    if len(items) == 1 and len(items[0]) > 200:
+        # Try to split it into multiple items based on common patterns
         text = items[0]
         
-        # Try to split on common patterns
-        split_items = []
-        
-        # First check if there are numbered points (e.g., "1.", "2.", etc.)
-        numbered_pattern = re.compile(r'(\d+\.\s+)')
-        numbered_splits = numbered_pattern.split(text)
-        
-        if len(numbered_splits) > 1:
-            # We have numbered points
-            current_item = ""
-            for i, part in enumerate(numbered_splits):
-                if numbered_pattern.match(part):
-                    # This is a number marker
-                    if current_item:
-                        split_items.append(current_item.strip())
-                    current_item = part
-                else:
-                    current_item += part
-            if current_item:
-                split_items.append(current_item.strip())
-        else:
-            # Try to split on bullet points or dashes
-            bullet_pattern = re.compile(r'(\s*[-•]\s+)')
-            bullet_splits = bullet_pattern.split(text)
+        # Check for numbered lists
+        if re.search(r'^\d+\.\s', text, re.MULTILINE):
+            # Already has numbered list formatting, just enhance it
+            return enhance_markdown(text)
             
-            if len(bullet_splits) > 1:
-                # We have bullet points
+        # Check for bullet points
+        if re.search(r'^[-•]\s', text, re.MULTILINE):
+            # Already has bullet list formatting, just enhance it
+            return enhance_markdown(text)
+            
+        # Try to split on numbered patterns like "1." or "1)"
+        if re.search(r'\d+[\.\)]\s', text):
+            # Split the text on these patterns
+            parts = re.split(r'(\d+[\.\)]\s+)', text)
+            if len(parts) > 2:  # We have at least one match plus text before and after
+                formatted_text = ""
                 current_item = ""
-                for i, part in enumerate(bullet_splits):
-                    if bullet_pattern.match(part):
-                        # This is a bullet marker
+                
+                for i, part in enumerate(parts):
+                    if re.match(r'\d+[\.\)]\s+', part):
+                        # This is a number marker
                         if current_item:
-                            split_items.append(current_item.strip())
+                            formatted_text += current_item + "\n\n"
                         current_item = part
                     else:
                         current_item += part
-                if current_item:
-                    split_items.append(current_item.strip())
-            else:
-                # Try to split on section headers
-                section_pattern = re.compile(r'(\d+\.\s+[A-Z][A-Za-z\s]+:)')
-                section_splits = section_pattern.split(text)
                 
-                if len(section_splits) > 1:
-                    # We have section headers
-                    current_item = ""
-                    for i, part in enumerate(section_splits):
-                        if section_pattern.match(part):
-                            # This is a section header
-                            if current_item:
-                                split_items.append(current_item.strip())
-                            current_item = part
-                        else:
-                            current_item += part
-                    if current_item:
-                        split_items.append(current_item.strip())
-                else:
-                    # Last resort: split on double newlines or periods followed by space
-                    split_items = re.split(r'\n\n+|\.\s+', text)
-        
-        # If we successfully split the text, use those items
-        if split_items:
-            items = split_items
+                if current_item:
+                    formatted_text += current_item
+                
+                return enhance_markdown(formatted_text)
+            
+        # Split on periods followed by space as a last resort
+        if '.' in text:
+            items = []
+            sentences = re.split(r'(?<=[.!?])\s+', text)
+            for i, sentence in enumerate(sentences):
+                if sentence.strip():
+                    # For the first item, don't add a number
+                    if i == 0:
+                        items.append(sentence.strip())
+                    else:
+                        # For subsequent items, add a number
+                        items.append(f"{i}. {sentence.strip()}")
     
-    # Format each item and ensure it starts with a markdown list marker
-    formatted_items = []
-    for item in items:
-        # Skip empty items
+    # Format each item as a markdown list item
+    markdown_items = []
+    for i, item in enumerate(items):
         if not item.strip():
             continue
             
-        # Format the item text but don't apply the general markdown formatting
-        # that might over-bold everything
-        formatted_item = item.strip()
+        # Clean up the item
+        clean_item = item.strip()
         
-        # Only apply specific formatting for headers
-        formatted_item = re.sub(r'^([A-Z][A-Za-z\s]+:)', r'### \1', formatted_item, flags=re.MULTILINE)
-        
-        # Ensure it starts with a list marker if it doesn't already
-        if not formatted_item.strip().startswith('-') and not re.match(r'^\d+\.', formatted_item.strip()):
-            formatted_item = f"- {formatted_item}"
-            
-        # Add to the list
-        formatted_items.append(formatted_item)
+        # If it's already a list item, use it as is
+        if clean_item.startswith('- ') or re.match(r'^\d+[\.\)]\s', clean_item):
+            # Ensure proper spacing after the number
+            if re.match(r'^\d+[\.\)]\s', clean_item):
+                clean_item = re.sub(r'^(\d+[\.\)])\s*', r'\1 ', clean_item)
+            markdown_items.append(clean_item)
+        else:
+            # Make it a numbered list item if it looks like it should be numbered
+            if re.match(r'^\d+\s', clean_item):
+                # It starts with a number but is missing the period
+                clean_item = re.sub(r'^(\d+)\s+', r'\1. ', clean_item)
+                markdown_items.append(clean_item)
+            else:
+                # Make it a bullet point
+                markdown_items.append(f"- {clean_item}")
     
-    # Join with double newlines to ensure proper spacing between list items
-    return "\n\n".join(formatted_items)
+    # Join with blank lines between items for proper markdown rendering
+    return enhance_markdown('\n\n'.join(markdown_items))
 
 # Define the app layout
 app.layout = dbc.Container([
@@ -185,8 +282,7 @@ app.layout = dbc.Container([
         dbc.Col([
             html.H1("Hidden Data Insights", className="display-4 text-primary mb-4"),
             html.P(
-                "Discover hidden patterns in your data using OpenAI's GPT-3.5 model. "
-                "No data analysts required!",
+                f"Discover hidden patterns in your data using OpenAI's {model_name}.",
                 className="lead"
             ),
         ], width=12)
@@ -297,7 +393,7 @@ app.layout = dbc.Container([
                     dbc.Row([
                         dbc.Col([
                             dbc.Button(
-                                "Analyze with GPT-3.5",
+                                f"Analyze with {model_name}",
                                 id="analyze-btn",
                                 color="success",
                                 className="mt-3",
@@ -364,7 +460,7 @@ app.layout = dbc.Container([
         dbc.Col([
             html.Hr(),
             html.P(
-                "Hidden Data Insights - Powered by OpenAI GPT-3.5",
+                f"Hidden Data Insights - Powered by OpenAI {model_name}",
                 className="text-center text-muted"
             )
         ], width=12)
@@ -527,7 +623,7 @@ def download_csv(n_clicks, dataset_json):
     return dcc.send_data_frame(df.to_csv, "hidden_data_insights_dataset.csv", index=False)
 
 @app.callback(
-    [Output("analysis-store", "data"), Output("analysis-loading-indicator", "children")],
+    [Output("analysis-store", "data"), Output("analysis-loading-indicator", "style")],
     Input("analyze-btn", "n_clicks"),
     [
         State("dataset-store", "data"),
@@ -538,7 +634,7 @@ def download_csv(n_clicks, dataset_json):
 )
 def analyze_dataset(n_clicks, dataset_json, dataset_type, specific_questions):
     if not dataset_json or not llm_analyzer:
-        return None, html.Div()
+        return None, {"display": "none"}
     
     # Convert JSON back to DataFrame
     df = pd.read_json(StringIO(dataset_json), orient='split')
@@ -555,8 +651,16 @@ def analyze_dataset(n_clicks, dataset_json, dataset_type, specific_questions):
         specific_questions=questions_list
     )
     
-    # Return both the analysis results and a success message
-    return analysis_results, html.Div("Analysis complete!", className="text-success")
+    # If there were specific questions but no specific answers in the results,
+    # create placeholder answers to ensure they appear in the UI
+    if questions_list and not analysis_results.get("specific_answers"):
+        analysis_results["specific_answers"] = []
+        for question in questions_list:
+            # Create a placeholder that will trigger our extraction logic
+            analysis_results["specific_answers"].append(f"Q: {question}\nA: See analysis for details.")
+    
+    # Return the analysis results and hide the loading indicator
+    return analysis_results, {"display": "none"}
 
 # Add a client-side callback to show the spinner immediately when the button is clicked
 app.clientside_callback(
@@ -576,7 +680,7 @@ app.clientside_callback(
     """,
     [
         Output("analyze-btn", "style"),
-        Output("analysis-loading-indicator", "style")
+        Output("analysis-loading-indicator", "style", allow_duplicate=True)
     ],
     Input("analyze-btn", "n_clicks"),
     prevent_initial_call=True
@@ -594,19 +698,27 @@ def update_summary_tab(analysis_results):
     summary = analysis_results.get("summary", "No summary available.")
     
     # Apply the markdown formatting function
-    formatted_summary = format_text_as_markdown(summary)
+    formatted_summary = enhance_markdown(summary)
     
     return dbc.Card([
         dbc.CardBody([
-            html.H4("Data Analysis Summary", className="card-title"),
-            dcc.Markdown(
-                formatted_summary,
-                className="card-text",
-                style={"padding": "10px", "white-space": "pre-wrap"},
-                dangerously_allow_html=True
-            )
-        ])
-    ])
+            html.H4("Data Analysis Summary", className="card-title mb-4"),
+            html.Div([
+                dcc.Markdown(
+                    formatted_summary,
+                    className="markdown-content",
+                    style={
+                        "white-space": "pre-wrap",
+                        "line-height": "1.8",
+                        "font-size": "1.1rem",
+                        "overflow-wrap": "break-word",
+                        "word-break": "normal"
+                    },
+                    dangerously_allow_html=True
+                )
+            ], className="card-text p-3")
+        ], className="p-4")
+    ], className="shadow-sm")
 
 @app.callback(
     Output("specific-questions-tab-content", "children"),
@@ -617,41 +729,132 @@ def update_specific_questions_tab(analysis_results, specific_questions_text):
     if not analysis_results:
         return html.Div("No analysis results available. Please analyze the data first.")
     
+    # Check if specific questions were asked
+    if not specific_questions_text or not specific_questions_text.strip():
+        return html.Div([
+            html.H4("No Specific Questions", className="mb-4"),
+            html.P("You didn't enter any specific questions before analysis. To get targeted insights, add questions in the 'Analyze Data' section and run the analysis again.", className="lead")
+        ])
+    
+    # Get specific answers from analysis results
     specific_answers = analysis_results.get("specific_answers", [])
     
+    # If no specific answers were found but questions were asked
     if not specific_answers:
-        if not specific_questions_text:
-            return html.Div("No specific questions were asked. Enter questions in the 'Analyze Data' section.")
-        else:
-            return html.Div("No specific answers were found in the analysis. Try rephrasing your questions.")
+        # Try to extract answers from the raw analysis
+        raw_analysis = analysis_results.get("raw_analysis", "")
+        if not raw_analysis:
+            raw_analysis = analysis_results.get("summary", "") + "\n\n" + "\n\n".join([
+                "\n".join(analysis_results.get("hidden_patterns", [])),
+                "\n".join(analysis_results.get("unusual_correlations", [])),
+                "\n".join(analysis_results.get("causal_relationships", [])),
+                "\n".join(analysis_results.get("recommendations", []))
+            ])
+        
+        # Look for question-answer patterns in the raw analysis
+        extracted_answers = []
+        questions = [q.strip() for q in specific_questions_text.split('\n') if q.strip()]
+        
+        for question in questions:
+            # Try to find a direct answer in the raw analysis
+            # Look for the question text or keywords
+            keywords = [word for word in question.lower().split() if len(word) > 3]
+            
+            # Find relevant sections
+            relevant_sections = []
+            for keyword in keywords:
+                if keyword in raw_analysis.lower():
+                    paragraphs = raw_analysis.split('\n\n')
+                    for para in paragraphs:
+                        if keyword in para.lower() and para not in relevant_sections:
+                            relevant_sections.append(para)
+            
+            if relevant_sections:
+                answer = "Based on the analysis: " + "\n\n".join(relevant_sections)
+            else:
+                answer = "See analysis for details."
+                
+            extracted_answers.append({"question": question, "answer": answer})
+            
+        specific_answers = extracted_answers
     
-    # Create a card for each question and answer
+    # Format and display the answers
     answer_cards = []
     
-    for i, answer in enumerate(specific_answers):
-        # Split into question and answer parts
-        parts = answer.split('\nA: ')
-        if len(parts) == 2:
-            question = parts[0].replace('Q: ', '')
-            answer_text = parts[1]
+    for i, qa_pair in enumerate(specific_answers):
+        if isinstance(qa_pair, dict):
+            question = qa_pair.get("question", f"Question {i+1}")
+            answer_text = qa_pair.get("answer", "No answer provided.")
+        else:
+            # Handle the case where specific_answers might be a list of strings
+            question = f"Question {i+1}"
+            answer_text = qa_pair
             
-            # For concise display, don't apply full markdown formatting
-            # Just ensure basic formatting is preserved
+        # If the answer is just a placeholder, try to extract from raw analysis
+        if answer_text == "See analysis for details.":
+            raw_analysis = analysis_results.get("raw_analysis", "")
+            if not raw_analysis:
+                raw_analysis = analysis_results.get("summary", "") + "\n\n" + "\n\n".join([
+                    "\n".join(analysis_results.get("hidden_patterns", [])),
+                    "\n".join(analysis_results.get("unusual_correlations", [])),
+                    "\n".join(analysis_results.get("causal_relationships", [])),
+                    "\n".join(analysis_results.get("recommendations", []))
+                ])
             
-            answer_cards.append(
-                dbc.Card([
-                    dbc.CardHeader(html.H5(f"Question {i+1}: {question}", className="text-primary")),
-                    dbc.CardBody([
+            # Extract keywords from the question
+            question_keywords = [word for word in question.lower().split() if len(word) > 3]
+            
+            # Find relevant sections
+            relevant_sections = []
+            for keyword in question_keywords:
+                if keyword in raw_analysis.lower():
+                    paragraphs = raw_analysis.split('\n\n')
+                    for para in paragraphs:
+                        if keyword in para.lower() and para not in relevant_sections:
+                            relevant_sections.append(para)
+            
+            if relevant_sections:
+                answer_text = "Based on the analysis: " + "\n\n".join(relevant_sections)
+            else:
+                answer_text = "No specific answer found in the analysis. Please check the Summary and Hidden Patterns tabs for relevant information."
+        
+        # Format the answer text with enhanced markdown
+        formatted_answer = enhance_markdown(answer_text)
+        
+        answer_cards.append(
+            dbc.Card([
+                dbc.CardHeader(html.H5(f"Question {i+1}: {question}", className="text-primary")),
+                dbc.CardBody([
+                    html.Div([
+                        html.Strong("Answer: ", className="me-2"),
                         html.Div([
-                            html.Strong("Answer: "),
-                            html.Span(answer_text)
-                        ], style={"fontSize": "1.1rem"})
+                            dcc.Markdown(
+                                formatted_answer,
+                                className="markdown-content",
+                                style={
+                                    "white-space": "pre-wrap",
+                                    "line-height": "1.8",
+                                    "font-size": "1.1rem",
+                                    "overflow-wrap": "break-word",
+                                    "word-break": "normal"
+                                },
+                                dangerously_allow_html=True
+                            )
+                        ])
                     ])
-                ], className="mb-3")
-            )
+                ], className="p-4")
+            ], className="mb-4 shadow-sm")
+        )
     
     if not answer_cards:
-        return html.Div("No specific answers were found in the analysis. Try rephrasing your questions.")
+        return html.Div([
+            html.H4("Specific Questions Analysis", className="mb-4"),
+            dbc.Alert([
+                html.H5("Processing Error", className="alert-heading"),
+                html.P("There was an issue processing the answers to your specific questions."),
+                html.P("Please try analyzing the data again or check the 'Raw Analysis' tab for insights.")
+            ], color="danger", className="mb-4")
+        ])
     
     return html.Div([
         html.H4("Answers to Your Specific Questions", className="mb-4"),
@@ -676,74 +879,143 @@ def update_patterns_tab(analysis_results):
     
     # Hidden Patterns
     if hidden_patterns:
-        # Format patterns with proper spacing
-        pattern_markdown = format_list_items(hidden_patterns)
+        # Format patterns with proper spacing and numbering
+        # Check if we need to join the patterns or if they're already formatted
+        if len(hidden_patterns) == 1 and len(hidden_patterns[0]) > 200 and re.search(r'\d+[\.\)]', hidden_patterns[0]):
+            # This is likely a pre-formatted list with numbers
+            pattern_markdown = enhance_markdown(hidden_patterns[0])
+        else:
+            # Format as a numbered list
+            numbered_patterns = []
+            for i, pattern in enumerate(hidden_patterns):
+                numbered_patterns.append(f"{i+1}. {pattern}")
+            pattern_markdown = enhance_markdown("\n\n".join(numbered_patterns))
         
         pattern_cards.append(
             dbc.Card([
                 dbc.CardHeader(html.H5("Hidden Patterns", className="text-primary")),
                 dbc.CardBody([
-                    dcc.Markdown(
-                        pattern_markdown, 
-                        style={"padding": "10px", "white-space": "pre-wrap"},
-                        dangerously_allow_html=True
-                    )
-                ])
-            ], className="mb-3")
+                    html.Div([
+                        dcc.Markdown(
+                            pattern_markdown, 
+                            className="markdown-content",
+                            style={
+                                "white-space": "pre-wrap",
+                                "line-height": "1.8",
+                                "font-size": "1.1rem",
+                                "overflow-wrap": "break-word",
+                                "word-break": "normal"
+                            },
+                            dangerously_allow_html=True
+                        )
+                    ], className="p-3")
+                ], className="p-4")
+            ], className="mb-4 shadow-sm")
         )
     
     # Unusual Correlations
     if unusual_correlations:
-        # Format correlations with proper spacing
-        correlation_markdown = format_list_items(unusual_correlations)
+        # Format correlations with proper spacing and numbering
+        if len(unusual_correlations) == 1 and len(unusual_correlations[0]) > 200 and re.search(r'\d+[\.\)]', unusual_correlations[0]):
+            # This is likely a pre-formatted list with numbers
+            correlation_markdown = enhance_markdown(unusual_correlations[0])
+        else:
+            # Format as a numbered list
+            numbered_correlations = []
+            for i, correlation in enumerate(unusual_correlations):
+                numbered_correlations.append(f"{i+1}. {correlation}")
+            correlation_markdown = enhance_markdown("\n\n".join(numbered_correlations))
         
         pattern_cards.append(
             dbc.Card([
                 dbc.CardHeader(html.H5("Unusual Correlations", className="text-primary")),
                 dbc.CardBody([
-                    dcc.Markdown(
-                        correlation_markdown, 
-                        style={"padding": "10px", "white-space": "pre-wrap"},
-                        dangerously_allow_html=True
-                    )
-                ])
-            ], className="mb-3")
+                    html.Div([
+                        dcc.Markdown(
+                            correlation_markdown, 
+                            className="markdown-content",
+                            style={
+                                "white-space": "pre-wrap",
+                                "line-height": "1.8",
+                                "font-size": "1.1rem",
+                                "overflow-wrap": "break-word",
+                                "word-break": "normal"
+                            },
+                            dangerously_allow_html=True
+                        )
+                    ], className="p-3")
+                ], className="p-4")
+            ], className="mb-4 shadow-sm")
         )
     
     # Causal Relationships
     if causal_relationships:
-        # Format relationships with proper spacing
-        relationship_markdown = format_list_items(causal_relationships)
+        # Format relationships with proper spacing and numbering
+        if len(causal_relationships) == 1 and len(causal_relationships[0]) > 200 and re.search(r'\d+[\.\)]', causal_relationships[0]):
+            # This is likely a pre-formatted list with numbers
+            relationship_markdown = enhance_markdown(causal_relationships[0])
+        else:
+            # Format as a numbered list
+            numbered_relationships = []
+            for i, relationship in enumerate(causal_relationships):
+                numbered_relationships.append(f"{i+1}. {relationship}")
+            relationship_markdown = enhance_markdown("\n\n".join(numbered_relationships))
         
         pattern_cards.append(
             dbc.Card([
                 dbc.CardHeader(html.H5("Potential Causal Relationships", className="text-primary")),
                 dbc.CardBody([
-                    dcc.Markdown(
-                        relationship_markdown, 
-                        style={"padding": "10px", "white-space": "pre-wrap"},
-                        dangerously_allow_html=True
-                    )
-                ])
-            ], className="mb-3")
+                    html.Div([
+                        dcc.Markdown(
+                            relationship_markdown, 
+                            className="markdown-content",
+                            style={
+                                "white-space": "pre-wrap",
+                                "line-height": "1.8",
+                                "font-size": "1.1rem",
+                                "overflow-wrap": "break-word",
+                                "word-break": "normal"
+                            },
+                            dangerously_allow_html=True
+                        )
+                    ], className="p-3")
+                ], className="p-4")
+            ], className="mb-4 shadow-sm")
         )
     
     # Recommendations
     if recommendations:
-        # Format recommendations with proper spacing
-        recommendation_markdown = format_list_items(recommendations)
+        # Format recommendations with proper spacing and numbering
+        if len(recommendations) == 1 and len(recommendations[0]) > 200 and re.search(r'\d+[\.\)]', recommendations[0]):
+            # This is likely a pre-formatted list with numbers
+            recommendation_markdown = enhance_markdown(recommendations[0])
+        else:
+            # Format as a numbered list
+            numbered_recommendations = []
+            for i, recommendation in enumerate(recommendations):
+                numbered_recommendations.append(f"{i+1}. {recommendation}")
+            recommendation_markdown = enhance_markdown("\n\n".join(numbered_recommendations))
         
         pattern_cards.append(
             dbc.Card([
                 dbc.CardHeader(html.H5("Recommendations", className="text-primary")),
                 dbc.CardBody([
-                    dcc.Markdown(
-                        recommendation_markdown, 
-                        style={"padding": "10px", "white-space": "pre-wrap"},
-                        dangerously_allow_html=True
-                    )
-                ])
-            ], className="mb-3")
+                    html.Div([
+                        dcc.Markdown(
+                            recommendation_markdown, 
+                            className="markdown-content",
+                            style={
+                                "white-space": "pre-wrap",
+                                "line-height": "1.8",
+                                "font-size": "1.1rem",
+                                "overflow-wrap": "break-word",
+                                "word-break": "normal"
+                            },
+                            dangerously_allow_html=True
+                        )
+                    ], className="p-3")
+                ], className="p-4")
+            ], className="mb-4 shadow-sm")
         )
     
     if not pattern_cards:
@@ -823,25 +1095,32 @@ def update_raw_tab(analysis_results):
     raw_analysis = analysis_results.get("raw_analysis", "No raw analysis available.")
     
     # Apply the markdown formatting function
-    formatted_analysis = format_text_as_markdown(raw_analysis)
+    formatted_analysis = enhance_markdown(raw_analysis)
     
     return dbc.Card([
         dbc.CardBody([
-            html.H4("Raw Analysis Output", className="card-title"),
-            dcc.Markdown(
-                formatted_analysis,
-                style={
-                    "background-color": "#f8f9fa",
-                    "padding": "15px",
-                    "border-radius": "5px",
-                    "max-height": "600px",
-                    "overflow-y": "auto",
-                    "white-space": "pre-wrap"
-                },
-                dangerously_allow_html=True
-            )
-        ])
-    ])
+            html.H4("Raw Analysis Output", className="card-title mb-4"),
+            html.Div([
+                dcc.Markdown(
+                    formatted_analysis,
+                    className="markdown-content",
+                    style={
+                        "background-color": "#f8f9fa",
+                        "padding": "20px",
+                        "border-radius": "5px",
+                        "max-height": "600px",
+                        "overflow-y": "auto",
+                        "white-space": "pre-wrap",
+                        "line-height": "1.8",
+                        "font-size": "1.05rem",
+                        "overflow-wrap": "break-word",
+                        "word-break": "normal"
+                    },
+                    dangerously_allow_html=True
+                )
+            ], className="p-2")
+        ], className="p-4")
+    ], className="shadow-sm")
 
 # Add a callback to automatically select the Specific Questions tab when specific questions are asked
 @app.callback(
@@ -853,8 +1132,9 @@ def set_active_tab(analysis_results, specific_questions_text):
     if not analysis_results:
         return "summary-tab"
     
-    # If there are specific questions and answers, select the specific questions tab
-    if specific_questions_text and analysis_results.get("specific_answers"):
+    # If there are specific questions, select the specific questions tab
+    # regardless of whether there are direct answers or not
+    if specific_questions_text and specific_questions_text.strip():
         return "specific-questions-tab"
     
     # Otherwise, default to summary tab
