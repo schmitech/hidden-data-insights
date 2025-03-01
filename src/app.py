@@ -51,8 +51,11 @@ app.index_string = '''
         {%css%}
         <style>
             /* Custom CSS for markdown rendering */
-            .markdown-content strong {
-                font-weight: bold;
+            .markdown-content strong, 
+            .markdown-content b,
+            .dash-markdown strong,
+            .dash-markdown b {
+                font-weight: bold !important;
             }
             .markdown-content h3 {
                 margin-top: 1.5rem;
@@ -68,6 +71,22 @@ app.index_string = '''
             }
             .markdown-content p {
                 margin-bottom: 1rem;
+            }
+            /* Ensure HTML tags are properly styled */
+            .markdown-content a {
+                color: #007bff;
+                text-decoration: none;
+            }
+            .markdown-content a:hover {
+                text-decoration: underline;
+            }
+            /* Fix for Dash's markdown styling */
+            .dash-markdown p {
+                margin-bottom: 1rem;
+            }
+            /* Style for the wrapper div */
+            .dash-markdown-wrapper {
+                width: 100%;
             }
         </style>
     </head>
@@ -109,12 +128,26 @@ def enhance_markdown(text):
     # Save existing markdown code blocks
     text = re.sub(r'```[\s\S]+?```', save_code_block, text)
     
+    # Convert HTML <strong> tags to markdown bold syntax
+    text = re.sub(r'<strong>(.*?)</strong>', r'**\1**', text)
+    
+    # Save HTML tags to prevent modifying them
+    html_tags = []
+    def save_html_tag(match):
+        html_tags.append(match.group(0))
+        return f"HTML_TAG_{len(html_tags)-1}"
+    
+    # Save existing HTML tags
+    text = re.sub(r'<([a-zA-Z]+)[^>]*>.*?</\1>', save_html_tag, text, flags=re.DOTALL)
+    text = re.sub(r'<([a-zA-Z]+)[^>]*>', save_html_tag, text)
+    text = re.sub(r'</([a-zA-Z]+)>', save_html_tag, text)
+    
     # Handle section headers - convert "Title:" format to markdown headers
     text = re.sub(r'^([A-Z][A-Za-z\s]+):(\s*)', r'### \1\2', text, flags=re.MULTILINE)
     
     # Handle dash-separated items (common in summaries)
-    # Convert "- Item:" to HTML bold for better rendering
-    text = re.sub(r'\s*-\s+([^:]+):', r'\n\n<strong>\1:</strong>', text)
+    # Convert "- Item:" to markdown bold for better rendering
+    text = re.sub(r'\s*-\s+([^:]+):', r'\n\n**\1:**', text)
     
     # Ensure numbered lists have proper spacing and formatting
     # Add a space after numbers if missing
@@ -123,10 +156,10 @@ def enhance_markdown(text):
     # Ensure bullet points have proper spacing
     text = re.sub(r'^\s*[-•]\s*', r'- ', text, flags=re.MULTILINE)
     
-    # Bold percentages for emphasis using HTML tags
-    text = re.sub(r'(\d+\.?\d*\s*%)', r'<strong>\1</strong>', text)
+    # Bold percentages for emphasis using markdown syntax
+    text = re.sub(r'(\d+\.?\d*\s*%)', r'**\1**', text)
     
-    # Bold key terms for emphasis using HTML tags
+    # Bold key terms for emphasis using markdown syntax
     key_terms = [
         r'\bkey\b', r'\bsignificant\b', r'\bimportant\b', r'\bcritical\b', 
         r'\bhighly\b', r'\bnotable\b', r'\bsubstantial\b', r'\bmajor\b',
@@ -134,14 +167,11 @@ def enhance_markdown(text):
     ]
     
     for term in key_terms:
-        text = re.sub(term, f'<strong>{term.replace(r"\\b", "")}</strong>', text, flags=re.IGNORECASE)
+        text = re.sub(term, f'**{term.replace(r"\\b", "")}**', text, flags=re.IGNORECASE)
     
     # Special handling for summary text that often has dash-separated items
     # Look for patterns like "1. Title - Detail: More details"
-    text = re.sub(r'(\d+\.\s+[^-]+)\s*-\s*([^:]+):', r'\1\n\n<strong>\2:</strong>', text)
-    
-    # Convert any remaining markdown-style bold (**text**) to HTML bold
-    text = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', text)
+    text = re.sub(r'(\d+\.\s+[^-]+)\s*-\s*([^:]+):', r'\1\n\n**\2:**', text)
     
     # Improve paragraph and list formatting
     lines = text.split('\n')
@@ -183,6 +213,10 @@ def enhance_markdown(text):
     
     # Remove excessive newlines (more than 2 consecutive)
     text = re.sub(r'\n{3,}', r'\n\n', text)
+    
+    # Restore HTML tags
+    for i, tag in enumerate(html_tags):
+        text = text.replace(f"HTML_TAG_{i}", tag)
     
     # Restore code blocks
     for i, block in enumerate(code_blocks):
@@ -704,18 +738,20 @@ def update_summary_tab(analysis_results):
         dbc.CardBody([
             html.H4("Data Analysis Summary", className="card-title mb-4"),
             html.Div([
-                dcc.Markdown(
-                    formatted_summary,
-                    className="markdown-content",
-                    style={
-                        "white-space": "pre-wrap",
-                        "line-height": "1.8",
-                        "font-size": "1.1rem",
-                        "overflow-wrap": "break-word",
-                        "word-break": "normal"
-                    },
-                    dangerously_allow_html=True
-                )
+                html.Div([  # Add an extra wrapper div with a specific class
+                    dcc.Markdown(
+                        formatted_summary,
+                        className="markdown-content",
+                        style={
+                            "white-space": "pre-wrap",
+                            "line-height": "1.8",
+                            "font-size": "1.1rem",
+                            "overflow-wrap": "break-word",
+                            "word-break": "normal"
+                        },
+                        dangerously_allow_html=True
+                    )
+                ], className="dash-markdown-wrapper")
             ], className="card-text p-3")
         ], className="p-4")
     ], className="shadow-sm")
@@ -828,18 +864,20 @@ def update_specific_questions_tab(analysis_results, specific_questions_text):
                     html.Div([
                         html.Strong("Answer: ", className="me-2"),
                         html.Div([
-                            dcc.Markdown(
-                                formatted_answer,
-                                className="markdown-content",
-                                style={
-                                    "white-space": "pre-wrap",
-                                    "line-height": "1.8",
-                                    "font-size": "1.1rem",
-                                    "overflow-wrap": "break-word",
-                                    "word-break": "normal"
-                                },
-                                dangerously_allow_html=True
-                            )
+                            html.Div([  # Add wrapper div
+                                dcc.Markdown(
+                                    formatted_answer,
+                                    className="markdown-content",
+                                    style={
+                                        "white-space": "pre-wrap",
+                                        "line-height": "1.8",
+                                        "font-size": "1.1rem",
+                                        "overflow-wrap": "break-word",
+                                        "word-break": "normal"
+                                    },
+                                    dangerously_allow_html=True
+                                )
+                            ], className="dash-markdown-wrapper")
                         ])
                     ])
                 ], className="p-4")
@@ -896,18 +934,20 @@ def update_patterns_tab(analysis_results):
                 dbc.CardHeader(html.H5("Hidden Patterns", className="text-primary")),
                 dbc.CardBody([
                     html.Div([
-                        dcc.Markdown(
-                            pattern_markdown, 
-                            className="markdown-content",
-                            style={
-                                "white-space": "pre-wrap",
-                                "line-height": "1.8",
-                                "font-size": "1.1rem",
-                                "overflow-wrap": "break-word",
-                                "word-break": "normal"
-                            },
-                            dangerously_allow_html=True
-                        )
+                        html.Div([  # Add wrapper div
+                            dcc.Markdown(
+                                pattern_markdown, 
+                                className="markdown-content",
+                                style={
+                                    "white-space": "pre-wrap",
+                                    "line-height": "1.8",
+                                    "font-size": "1.1rem",
+                                    "overflow-wrap": "break-word",
+                                    "word-break": "normal"
+                                },
+                                dangerously_allow_html=True
+                            )
+                        ], className="dash-markdown-wrapper")
                     ], className="p-3")
                 ], className="p-4")
             ], className="mb-4 shadow-sm")
@@ -931,18 +971,20 @@ def update_patterns_tab(analysis_results):
                 dbc.CardHeader(html.H5("Unusual Correlations", className="text-primary")),
                 dbc.CardBody([
                     html.Div([
-                        dcc.Markdown(
-                            correlation_markdown, 
-                            className="markdown-content",
-                            style={
-                                "white-space": "pre-wrap",
-                                "line-height": "1.8",
-                                "font-size": "1.1rem",
-                                "overflow-wrap": "break-word",
-                                "word-break": "normal"
-                            },
-                            dangerously_allow_html=True
-                        )
+                        html.Div([  # Add wrapper div
+                            dcc.Markdown(
+                                correlation_markdown, 
+                                className="markdown-content",
+                                style={
+                                    "white-space": "pre-wrap",
+                                    "line-height": "1.8",
+                                    "font-size": "1.1rem",
+                                    "overflow-wrap": "break-word",
+                                    "word-break": "normal"
+                                },
+                                dangerously_allow_html=True
+                            )
+                        ], className="dash-markdown-wrapper")
                     ], className="p-3")
                 ], className="p-4")
             ], className="mb-4 shadow-sm")
@@ -966,18 +1008,20 @@ def update_patterns_tab(analysis_results):
                 dbc.CardHeader(html.H5("Potential Causal Relationships", className="text-primary")),
                 dbc.CardBody([
                     html.Div([
-                        dcc.Markdown(
-                            relationship_markdown, 
-                            className="markdown-content",
-                            style={
-                                "white-space": "pre-wrap",
-                                "line-height": "1.8",
-                                "font-size": "1.1rem",
-                                "overflow-wrap": "break-word",
-                                "word-break": "normal"
-                            },
-                            dangerously_allow_html=True
-                        )
+                        html.Div([  # Add wrapper div
+                            dcc.Markdown(
+                                relationship_markdown, 
+                                className="markdown-content",
+                                style={
+                                    "white-space": "pre-wrap",
+                                    "line-height": "1.8",
+                                    "font-size": "1.1rem",
+                                    "overflow-wrap": "break-word",
+                                    "word-break": "normal"
+                                },
+                                dangerously_allow_html=True
+                            )
+                        ], className="dash-markdown-wrapper")
                     ], className="p-3")
                 ], className="p-4")
             ], className="mb-4 shadow-sm")
@@ -1001,18 +1045,20 @@ def update_patterns_tab(analysis_results):
                 dbc.CardHeader(html.H5("Recommendations", className="text-primary")),
                 dbc.CardBody([
                     html.Div([
-                        dcc.Markdown(
-                            recommendation_markdown, 
-                            className="markdown-content",
-                            style={
-                                "white-space": "pre-wrap",
-                                "line-height": "1.8",
-                                "font-size": "1.1rem",
-                                "overflow-wrap": "break-word",
-                                "word-break": "normal"
-                            },
-                            dangerously_allow_html=True
-                        )
+                        html.Div([  # Add wrapper div
+                            dcc.Markdown(
+                                recommendation_markdown, 
+                                className="markdown-content",
+                                style={
+                                    "white-space": "pre-wrap",
+                                    "line-height": "1.8",
+                                    "font-size": "1.1rem",
+                                    "overflow-wrap": "break-word",
+                                    "word-break": "normal"
+                                },
+                                dangerously_allow_html=True
+                            )
+                        ], className="dash-markdown-wrapper")
                     ], className="p-3")
                 ], className="p-4")
             ], className="mb-4 shadow-sm")
@@ -1101,23 +1147,25 @@ def update_raw_tab(analysis_results):
         dbc.CardBody([
             html.H4("Raw Analysis Output", className="card-title mb-4"),
             html.Div([
-                dcc.Markdown(
-                    formatted_analysis,
-                    className="markdown-content",
-                    style={
-                        "background-color": "#f8f9fa",
-                        "padding": "20px",
-                        "border-radius": "5px",
-                        "max-height": "600px",
-                        "overflow-y": "auto",
-                        "white-space": "pre-wrap",
-                        "line-height": "1.8",
-                        "font-size": "1.05rem",
-                        "overflow-wrap": "break-word",
-                        "word-break": "normal"
-                    },
-                    dangerously_allow_html=True
-                )
+                html.Div([  # Add wrapper div
+                    dcc.Markdown(
+                        formatted_analysis,
+                        className="markdown-content",
+                        style={
+                            "background-color": "#f8f9fa",
+                            "padding": "20px",
+                            "border-radius": "5px",
+                            "max-height": "600px",
+                            "overflow-y": "auto",
+                            "white-space": "pre-wrap",
+                            "line-height": "1.8",
+                            "font-size": "1.05rem",
+                            "overflow-wrap": "break-word",
+                            "word-break": "normal"
+                        },
+                        dangerously_allow_html=True
+                    )
+                ], className="dash-markdown-wrapper")
             ], className="p-2")
         ], className="p-4")
     ], className="shadow-sm")
