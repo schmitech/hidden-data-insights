@@ -128,26 +128,18 @@ def enhance_markdown(text):
     # Save existing markdown code blocks
     text = re.sub(r'```[\s\S]+?```', save_code_block, text)
     
-    # Convert HTML <strong> tags to markdown bold syntax
-    text = re.sub(r'<strong>(.*?)</strong>', r'**\1**', text)
+    # Convert existing markdown bold syntax to HTML
+    text = re.sub(r'\*\*([^*]+)\*\*', r'<b>\1</b>', text)
     
-    # Save HTML tags to prevent modifying them
-    html_tags = []
-    def save_html_tag(match):
-        html_tags.append(match.group(0))
-        return f"HTML_TAG_{len(html_tags)-1}"
-    
-    # Save existing HTML tags
-    text = re.sub(r'<([a-zA-Z]+)[^>]*>.*?</\1>', save_html_tag, text, flags=re.DOTALL)
-    text = re.sub(r'<([a-zA-Z]+)[^>]*>', save_html_tag, text)
-    text = re.sub(r'</([a-zA-Z]+)>', save_html_tag, text)
+    # Convert HTML <strong> tags to <b> tags for consistency
+    text = re.sub(r'<strong>(.*?)</strong>', r'<b>\1</b>', text)
     
     # Handle section headers - convert "Title:" format to markdown headers
     text = re.sub(r'^([A-Z][A-Za-z\s]+):(\s*)', r'### \1\2', text, flags=re.MULTILINE)
     
     # Handle dash-separated items (common in summaries)
-    # Convert "- Item:" to markdown bold for better rendering
-    text = re.sub(r'\s*-\s+([^:]+):', r'\n\n**\1:**', text)
+    # Convert "- Item:" to HTML bold for better rendering
+    text = re.sub(r'\s*-\s+([^:]+):', r'\n\n<b>\1:</b>', text)
     
     # Ensure numbered lists have proper spacing and formatting
     # Add a space after numbers if missing
@@ -156,10 +148,10 @@ def enhance_markdown(text):
     # Ensure bullet points have proper spacing
     text = re.sub(r'^\s*[-•]\s*', r'- ', text, flags=re.MULTILINE)
     
-    # Bold percentages for emphasis using markdown syntax
-    text = re.sub(r'(\d+\.?\d*\s*%)', r'**\1**', text)
+    # Bold percentages for emphasis using HTML
+    text = re.sub(r'(\d+\.?\d*\s*%)', r'<b>\1</b>', text)
     
-    # Bold key terms for emphasis using markdown syntax
+    # Bold key terms for emphasis using HTML
     key_terms = [
         r'\bkey\b', r'\bsignificant\b', r'\bimportant\b', r'\bcritical\b', 
         r'\bhighly\b', r'\bnotable\b', r'\bsubstantial\b', r'\bmajor\b',
@@ -167,11 +159,11 @@ def enhance_markdown(text):
     ]
     
     for term in key_terms:
-        text = re.sub(term, f'**{term.replace(r"\\b", "")}**', text, flags=re.IGNORECASE)
+        text = re.sub(term, f'<b>{term.replace(r"\\b", "")}</b>', text, flags=re.IGNORECASE)
     
     # Special handling for summary text that often has dash-separated items
     # Look for patterns like "1. Title - Detail: More details"
-    text = re.sub(r'(\d+\.\s+[^-]+)\s*-\s*([^:]+):', r'\1\n\n**\2:**', text)
+    text = re.sub(r'(\d+\.\s+[^-]+)\s*-\s*([^:]+):', r'\1\n\n<b>\2:</b>', text)
     
     # Improve paragraph and list formatting
     lines = text.split('\n')
@@ -214,13 +206,17 @@ def enhance_markdown(text):
     # Remove excessive newlines (more than 2 consecutive)
     text = re.sub(r'\n{3,}', r'\n\n', text)
     
-    # Restore HTML tags
-    for i, tag in enumerate(html_tags):
-        text = text.replace(f"HTML_TAG_{i}", tag)
-    
     # Restore code blocks
     for i, block in enumerate(code_blocks):
         text = text.replace(f"CODE_BLOCK_{i}", block)
+    
+    # Fix any doubled asterisks that might have been created
+    text = re.sub(r'\*\*\*\*', r'', text)
+    text = re.sub(r'\*\*\*', r'*', text)
+    
+    # Fix any doubled bold tags
+    text = re.sub(r'<b><b>', r'<b>', text)
+    text = re.sub(r'</b></b>', r'</b>', text)
     
     return text
 
